@@ -28,7 +28,7 @@ def Gad(theta):
     Gads0[3] = Gads0[3] + 2*dOH #scaling between O and OH
     Gads0[4] = Gads0[4] + dOH
     Gads = F*Gads0 
-    GadA_OH = Gads[4] - 800*erf(8*(thetaA_OH-0.66))*thetaA_OH
+    GadA_OH = Gads[4] - 1000*erf(10*(thetaA_OH-0.66))*thetaA_OH
     Gads[4]= GadA_OH
     return Gads
 
