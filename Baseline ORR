@@ -1,0 +1,227 @@
+#Importing libraries- numpy, odeint, error function, matplotlib
+import numpy as np
+from scipy.integrate import odeint
+from scipy.special import erf
+import matplotlib.pyplot as plt
+plt.rcParams.update({'font.size': 14})
+
+dOH=0 # define OH-destabilization
+
+# Linear sweep voltammetrty- defining a potential as a function of time
+def potential(x):
+    UpperV = 1.05
+    LowerV = 0.5
+    scanrate = 0.01 #V/s
+    timescan=(UpperV-LowerV)/(scanrate)
+    if x%(2*timescan)<timescan:
+            Vapp = LowerV + scanrate*(x%((UpperV-LowerV)/(scanrate)))
+    else:
+            Vapp = UpperV - scanrate*(x%((UpperV-LowerV)/(scanrate)))
+    return Vapp
+
+# Defining free energies of adsorption and programming adsorption isotherms
+def Gad(theta):
+    thetaA_Star, thetaA_O2, thetaA_OOH, thetaA_O, thetaA_OH, thetaB_Star, thetaB_O, thetaB_OH = theta
+    Gads0 = np.array([0, 5.015, 3.935, 1.825, 0.775, 0, 2.33, 1.1]) #adsorption free energies for [free sitesA, O2adA, OOHadA, OadA, OHadA, H20, OadB, OHadB]
+    Gads0[1] = Gads0[1] + dOH
+    Gads0[2] = Gads0[2] + dOH
+    Gads0[3] = Gads0[3] + 2*dOH #scaling between O and OH
+    Gads0[4] = Gads0[4] + dOH
+    Gads = F*Gads0 
+    GadA_OH = Gads[4] - 800*erf(8*(thetaA_OH-0.66))*thetaA_OH
+    Gads[4]= GadA_OH
+    return Gads
+
+# Function to calculate reaction free energies from adsorption free energies
+def Grxn(Gads):
+    GadA_Star, GadA_O2, GadA_OOH, GadA_O, GadA_OH, GadB_Star, GadB_O, GadB_OH = Gads
+    dGr0 = GadA_O2 - (GadA_Star + F*5.19) # GO2 = 5.19
+    dGr1 = GadA_OOH - GadA_O2
+    dGr2 = GadA_O - GadA_OOH
+    dGr3 = GadA_OH - GadA_O
+    dGr4 = GadA_Star - GadA_OH
+    dGr5 = GadB_O + GadA_O - (GadB_Star + GadA_O2)
+    dGr6 = GadB_OH - GadB_O
+    dGr7 = GadB_Star - GadB_OH
+    dGr8 = GadA_OH + GadB_O - GadA_OOH - GadB_Star
+    Grxns = np.array([dGr0, dGr1, dGr2, dGr3, dGr4, dGr5, dGr6, dGr7, dGr8])
+    return Grxns
+
+# Function to calculate U and Keq from theta, dG
+def eqpot(theta):
+    thetaA_Star, thetaA_O2, thetaA_OOH, thetaA_O, thetaA_OH, thetaB_Star, thetaB_O, thetaB_OH = theta # unpack surface coverage
+    Gad1 = Gad(theta)
+    dG = Grxn(Gad1)
+    K0eq = np.exp(-dG[0]/RT) 
+    U1 = -dG[1]/F + (RT*np.log(thetaA_O2/thetaA_OOH))/F
+    U2 = -dG[2]/F + (RT*np.log(thetaA_OOH/thetaA_O))/F
+    U3 = -dG[3]/F + (RT*np.log(thetaA_O/thetaA_OH))/F
+    U4 = -dG[4]/F + (RT*np.log(thetaA_OH/thetaA_Star))/F
+    K5eq = np.exp(-dG[5]/RT)
+    U6 = -dG[6]/F + (RT*np.log(thetaB_O/thetaB_OH))/F
+    U7 = -dG[7]/F + (RT*np.log(thetaB_OH/thetaB_Star))/F
+    K8eq = np.exp(-dG[8]/RT)
+    eqconst =[K0eq, U1, U2, U3, U4, K5eq, U6, U7, K8eq]
+    return eqconst
+
+
+
+# Function to calculate elementary reaction rates from theta, V, U
+def rates(theta, V):
+    
+    thetaA_Star, thetaA_O2, thetaA_OOH, thetaA_O, thetaA_OH, thetaB_Star, thetaB_O, thetaB_OH = theta # unpack surface coverage
+    
+    Gad1 = Gad(theta) #adsorption free energies (function of coverage)
+    
+    dG = Grxn(Gad1) #reaction free energies (function of adsorption free energies)
+    
+    K0eq, U1, U2, U3, U4, K5eq, U6, U7, K8eq = eqpot(theta)  # call function to find U for given theta
+   
+    
+    r0 = kf[0]*((aO2*thetaA_Star)-(thetaA_O2/K0eq))
+    
+    r1 = (kf[1]*np.exp(beta[1]*dG[1]/RT)*(thetaA_OOH**beta[1])*(thetaA_O2**(1-beta[1]))*
+         (np.exp(-beta[1]*F*(V-U1)/RT)-np.exp((1-beta[1])*F*(V-U1)/RT)))
+    
+    r2 = (kf[2]*np.exp(beta[2]*dG[2]/RT)*(thetaA_O**beta[2])*(thetaA_OOH**(1-beta[2]))*
+         (np.exp(-beta[2]*F*(V-U2)/RT)-np.exp((1-beta[2])*F*(V-U2)/RT)))
+    
+    r3 = (kf[3]*np.exp(beta[3]*dG[3]/RT)*(thetaA_OH**beta[3])*(thetaA_O**(1-beta[3]))*
+         (np.exp(-beta[3]*F*(V-U3)/RT)-np.exp((1-beta[3])*F*(V-U3)/RT)))
+    
+    r4 = (kf[4]*np.exp(beta[4]*dG[4]/RT)*(thetaA_Star**beta[4])*(thetaA_OH**(1-beta[4]))*
+         (np.exp(-beta[4]*F*(V-U4)/RT)-np.exp((1-beta[4])*F*(V-U4)/RT)))
+    
+    r5 = kf[5]*np.exp(-(0.69*dG[5]+96485*1.07)/RT)*((thetaA_O2*thetaB_Star)-((thetaA_O*thetaB_O)/K5eq))
+    
+    r6 = (kf[6]*np.exp(beta[6]*dG[6]/RT)*(thetaB_OH**beta[6])*(thetaB_O**(1-beta[6]))*
+         (np.exp(-beta[6]*F*(V-U6)/RT)-np.exp((1-beta[6])*F*(V-U6)/RT)))
+    
+    r7 = (kf[7]*np.exp(beta[7]*dG[7]/RT)*(thetaB_Star**beta[7])*(thetaB_OH**(1-beta[7]))*
+         (np.exp(-beta[7]*F*(V-U7)/RT)-np.exp((1-beta[7])*F*(V-U7)/RT)))
+    
+    r8 = kf[8]*np.exp(-(0.39*dG[8]+96485*1.07)/RT)*((thetaA_OOH*thetaB_Star)-((thetaA_OH*thetaB_O)/K8eq))
+    
+    r = [r0, r1, r2, r3, r4, r5, r6, r7, r8]
+    return r
+
+# Function to calculate site balances from elementary reaction steps - this is the ODE
+def sitebal(theta,t,oparams):
+    V = potential(t)  # unpack applied voltage, other params?
+    r0, r1, r2, r3, r4, r5, r6, r7, r8 = rates(theta,V) # this calls the rate function, which calls eq pot
+    dthetadt = [(r4-r0)/cmax, (r0-r1-r5)/cmax, (r1-r2-r8)/cmax, (r2-r3+r5+r8)/cmax, (r3-r4)/cmax, (r7-r5-r8)/cmax, (r5-r6+r8)/cmax, (r6-r7)/cmax]  # these are the site balnaces
+    return dthetadt 
+
+
+
+# Physical parameters
+RT = 8.314*298   # Universial gas constant*Temperature J/mol
+F = 96485.0 # Faraday's constant C/mol
+aO2 = 2.34e-5 # partial pressure in Pa
+cmax= 7.5e-10 # total number of sites in mol.cm-2.s-1
+
+
+# model parameters for fitting
+ku = 2e9*cmax # Prefactor for electrochemical steps, mol.cm-2.s-1 
+kc1 = 5e7*cmax # Prefactor for O2 adsorption, mol.cm-2.s-1
+kc2 = 2e15*cmax # Prefactor for O2 and OOH dissociation, mol.cm-2.s-1
+kf = np.array([kc1, ku, ku, ku, ku, kc2, ku, ku, kc2])   # Set of prefactors/fitting paramters
+beta = np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5 ,0.5])  # transfer coefficients
+
+
+# Initial values for coverages
+thetaA_O20 = 0.05 # initial coverage O2ads
+thetaA_OOH0 = 0.05 # initial coverae OOHads
+thetaA_O0 = 0.05 # initial coverage Oads
+thetaA_OH0 = 0.2# initial coverage OHads
+thetaA_Star0 = 1.0 - (thetaA_O20+thetaA_OOH0+thetaA_O0+thetaA_OH0) # initial coverage empty sites
+thetaB_O0 = 0.1
+thetaB_OH0 = 0.1
+thetaB_Star0 = 1.0 -(thetaB_O0+thetaB_OH0)
+
+#initial conditions packed into theta0
+theta0 = [thetaA_Star0, thetaA_O20, thetaA_OOH0, thetaA_O0, thetaA_OH0, thetaB_Star0, thetaB_O0, thetaB_OH0]
+
+
+# Bundle parameters for ODE solver 
+oparams = (beta) 
+
+
+# Make time array for solution in seconds
+tStop = 110.
+tInc = 0.005 #time step
+t = np.arange(0., tStop, tInc) 
+ts = int(tStop/tInc) #total number of objects in the time array
+
+
+# defining empty arrays for potential, kinetic and total current density
+E = np.empty(ts, dtype=object)
+curr1 = np.empty(ts, dtype=object)
+tcurr1= np.empty(ts, dtype=object) 
+
+# define diffusion limited current, calculated from levich equation for 1600 rpm O2, 0.196 cm2 Pt(111) disk in 0.1 M HClO4
+iD = -6.12 # mA/cm2
+
+for i in range(ts):
+    E[i]=potential(t[i])
+    
+    
+# plot E(V) vs t(s)   
+plt.plot(t[2:ts], E[2:ts], 'b')
+plt.xlabel('Time (s)')
+plt.ylabel('E vs RHE (V)')
+plt.show()
+
+
+# Call the ODE solver
+soln1 = odeint(sitebal, theta0, t, args=(oparams,))
+
+
+
+# plot coverage as a function of time
+plt.plot(t, soln1[:, 0], 'm', label='*,A')
+plt.plot(t, soln1[:, 1], 'b', label='O2,A')
+plt.plot(t, soln1[:, 2], 'g', label='OOH,A')
+plt.plot(t, soln1[:, 3], 'r', label='O,A')
+plt.plot(t, soln1[:, 4], 'c', label='OH,A')
+
+
+plt.legend(loc='best')
+plt.xlabel('t(s)')
+plt.ylabel('Coverages')
+plt.show()
+
+# plot coverages on *A sites as a function of potential
+plt.plot(E[10:], soln1[10:, 0], 'm', label='*,A')
+plt.plot(E[10:], soln1[10:, 1], 'b', label='O2,A')
+plt.plot(E[10:], soln1[10:, 2], 'g', label='OOH,A')
+plt.plot(E[10:], soln1[10:, 3], 'r', label='O,A')
+plt.plot(E[10:], soln1[10:, 4], 'c', label='OH,A')
+
+
+plt.legend(loc='best')
+plt.xlabel('E vs RHE (V)')
+plt.ylabel('Coverages')
+plt.show()
+
+
+# calculate current from our solution- this will be a function time (and also potential- since potential is a function of time)
+for i in range(ts):
+    theta_temp=soln1[i,:] #load solution as function of 't'
+    Vapp=potential(t[i])   #calculate pontential 't'
+    R=rates(theta_temp, Vapp) #calculate rates for the current set of coverage values, at this particular 't'
+    curr1[i]=-1000*F*(R[1]+R[2]+R[3]+R[4]+R[6]+R[7])  #kinetic current is the summation of rates of all electrochemical steps
+    tcurr1[i]=iD*curr1[i]/(iD+curr1[i]) #Koutecky-levich equation to get the total current density
+    
+    
+# plot kinetic current desnity as a function of potential
+plt.plot(E[10:20000], curr1[10:20000], 'b')
+plt.xlabel('E vs RHE(V)')
+plt.ylabel('Kinetic current (mA/cm2)')
+plt.show()
+
+# plot total current density as a function of potential
+plt.plot(E[10:20000], tcurr1[10:20000], 'b')
+plt.xlabel('E vs RHE(V)')
+plt.ylabel('Total current (mA/cm2)')
+plt.show()
